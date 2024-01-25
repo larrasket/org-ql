@@ -30,7 +30,10 @@
 (require 'with-simulated-input)
 
 (require 'org-ql)
+(require 'org-ql-search)
 (require 'org-ql-view)
+
+(require 'xr)
 
 ;;;; Variables
 
@@ -105,27 +108,24 @@ Set at runtime by test suite.")
   "Return buffer visiting FILENAME.
 FILENAME should be a file in the \"tests\" directory."
   (->> (locate-dominating-file default-directory ".git")
-    (expand-file-name "tests")
-    (expand-file-name filename)
-    find-file-noselect))
+       (expand-file-name "tests")
+       (expand-file-name filename)
+       find-file-noselect))
 
 ;;;; Macros
 
 (defmacro org-ql-it (description &rest body)
-  "Expand to two specs, one of which tests with preambles and the other without.
-Based on Buttercup macro `it'."
+  "Expand to two specs, one of which tests with preambles and the other without."
   (declare (indent 1) (debug (&define sexp def-body)))
-  (if body
-      `(progn
-         (buttercup-it ,(concat description " (preamble)   ")
-           (lambda ()
-             (let ((org-ql-use-preamble t))
-               ,@body)))
-         (buttercup-it ,(concat description " (no preamble)")
-           (lambda ()
-             (let ((org-ql-use-preamble nil))
-               ,@body))))
-    `(buttercup-xit ,description)))
+  `(progn
+     (it ,(concat description " (preamble)   ")
+       ,(when body
+          `(let ((org-ql-use-preamble t))
+             ,@body)))
+     (it ,(concat description " (no preamble)   ")
+       ,(when body
+          `(let ((org-ql-use-preamble nil))
+             ,@body)))) )
 
 (cl-defmacro org-ql-expect (ql-args results &key (buffer 'org-ql-test-buffer))
   "Expand to `expect' test form that expects QL-ARGS to equal RESULTS.
@@ -164,8 +164,9 @@ with keyword arg NOW in PLIST."
           (substring-no-properties (org-get-heading t t)))
       (defun org-ql-test-org-get-heading ()
         ;; For Org 9.1.9.
-        (substring-no-properties (org-get-heading t t t t))))
+        (substring-no-properties (org-get-heading t t t t)))) )
 
+  (before-each
     (setq org-ql-test-buffer (org-ql-test-data-buffer "data.org")
           ;; For manual testing:
           ;; org-ql-test-buffer (find-file-noselect "data.org")
@@ -202,7 +203,7 @@ with keyword arg NOW in PLIST."
         (insert "* Heading 1")
         ;; FIXME: `--value-at' does not actually move point, so we do it here.
         (goto-char (point-min))
-        (expect (org-ql--value-at (point-min) #'org-get-local-tags)
+        (expect (org-ql--value-at (point-min) #'ignore)
                 :to-be nil))))
 
   (describe "Query pre-processing"
@@ -327,11 +328,17 @@ with keyword arg NOW in PLIST."
         (it "normalizes non-keyword args with a :lang keyword arg to keywords"
           (expect (org-ql--normalize-query '(src "foo" "bar" :lang "baz"))
                   :to-equal '(src :lang "baz" :regexps '("foo" "bar"))))
+        (it "normalizes zero args without looping"
+          (expect (org-ql--normalize-query '(src))
+                  :to-equal '(src)))
         (it "normalizes all-keyword args without looping"
           (expect (org-ql--normalize-query '(src :regexps ("foo") :lang "bar"))
                   :to-equal '(src :lang "bar" :regexps '("foo")))
           (expect (org-ql--normalize-query '(src :regexps ("foo") :lang))
-                  :to-equal '(src :regexps '("foo")))))
+                  :to-equal '(src :regexps '("foo"))))
+        (it "normalizes just the :lang keyword arg"
+          (expect (org-ql--normalize-query '(src :lang "bar"))
+                  :to-equal '(src :lang "bar" :regexps 'nil))))
 
       (describe "(tags-inherited)"
         (it "handles 0 arguments"
@@ -640,6 +647,14 @@ with keyword arg NOW in PLIST."
     (describe "Plain query parsing"
 
       ;; TODO: Other predicates.
+
+      (it "Ignores empty quoted strings"
+        (expect (org-ql--query-string-to-sexp "\"\"")
+                :to-equal nil)
+        (expect (org-ql--query-string-to-sexp "foo \"\" bar")
+                :to-equal '(and (rifle "foo") (rifle "bar")))
+        (expect (org-ql--query-string-to-sexp "foo \"baz\" bar")
+                :to-equal '(and (rifle "foo") (rifle "baz") (rifle "bar"))))
 
       (it "Negated terms"
         (expect (org-ql--query-string-to-sexp "todo: !todo:CHECK,SOMEDAY")
@@ -1136,7 +1151,41 @@ with keyword arg NOW in PLIST."
           '("/r/emacs")))
       (org-ql-it "with :description and :target regexp"
         (org-ql-expect ('(link :description "em.cs" :target "em.cs" :regexp-p t))
-          '("/r/emacs"))))
+          '("/r/emacs")))
+
+      (describe "matches links whose descriptions contain brackets"
+        (before-each
+          (setq org-ql-test-buffer (org-ql-test-data-buffer "data-links.org")))
+
+        (unless (version< org-version "9.3")
+          ;; Earlier Org versions don't allow escaped brackets in descriptions.
+          (org-ql-it "without arguments"
+            (org-ql-expect ('(link))
+              '("Alpha")))
+          (org-ql-it "with description-or-target"
+            (org-ql-expect ('(link "phrase"))
+              '("Alpha")))
+          (org-ql-it "with :description"
+            (org-ql-expect ('(link :description "phrase"))
+              '("Alpha")))
+          (org-ql-it "with :target"
+            (org-ql-expect ('(link :target "id:"))
+              '("Alpha")))
+          (org-ql-it "with :description and :target"
+            (org-ql-expect ('(link :description "phrase" :target "id"))
+              '("Alpha")))
+          (org-ql-it "with description-or-target regexp"
+            (org-ql-expect ('(link "id:.*" :regexp-p t))
+              '("Alpha")))
+          (org-ql-it "with :description regexp"
+            (org-ql-expect ('(link :description "phr.se" :regexp-p t))
+              '("Alpha")))
+          (org-ql-it "with :target regexp"
+            (org-ql-expect ('(link :target "id:.*" :regexp-p t))
+              '("Alpha")))
+          (org-ql-it "with :description and :target regexp"
+            (org-ql-expect ('(link :description "phr.se" :target "id:.*" :regexp-p t))
+              '("Alpha"))))))
 
     (describe "(outline-path)"
       (org-ql-it "with one argument"
@@ -1366,9 +1415,45 @@ with keyword arg NOW in PLIST."
           (org-ql-expect ('(scheduled :on 0))
             '("Practice leaping tall buildings in a single bound" "Order a pizza" "Get haircut" "Fix flux capacitor" "Shop for groceries" "Rewrite Emacs in Common Lisp")))))
 
-    ;; ;; TODO: Test (src) predicate.  That will require modifying test data, which will be a
-    ;; ;; significant hassle.  Manual testing shows that the predicate appears to work properly.
-    ;;
+    (describe "(src)"
+      (before-each
+        ;; It would seem preferable to use :var for this, but this seems more reliable.
+        (setq org-ql-test-buffer (org-ql-test-data-buffer "data-src.org")))
+
+      (org-ql-it "without arguments"
+        (org-ql-expect ('(src))
+          '("Alpha" "Bravo")))
+
+      (org-ql-it "with plain argument"
+        ;; Finds in first source block in entry.
+        (org-ql-expect ('(src "foo"))
+          '("Alpha"))
+        (org-ql-expect ('(src "bar"))
+          '("Bravo"))
+        (org-ql-expect ('(src "print"))
+          ;; Finds in subsequent source block in entry.
+          '("Alpha" "Bravo")))
+
+      (org-ql-it "with :regexps argument"
+        (org-ql-expect ('(src :regexps ("foo")))
+          '("Alpha"))
+        (org-ql-expect ('(src :regexps ("bar")))
+          '("Bravo"))
+        (org-ql-expect ('(src :regexps ("print" "foo")))
+          '("Alpha"))
+        (org-ql-expect ('(src :regexps ("foo" "bar")))
+          nil))
+
+      (org-ql-it "with :lang argument"
+        ;; Finds in first source block in entry.
+        (org-ql-expect ('(src :lang "elisp"))
+          '("Alpha" "Bravo"))
+        ;; Finds in subsequent source block in entry.
+        (org-ql-expect ('(src :lang "python"))
+          '("Alpha" "Bravo"))
+        (org-ql-expect ('(src :lang "js"))
+          '("Alpha"))))
+
     (describe "(todo)"
 
       (org-ql-it "without arguments"
@@ -1409,10 +1494,10 @@ with keyword arg NOW in PLIST."
       (org-ql-it "with file tags"
         (org-ql-expect ('(tags "food"))
           '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
-          :buffer (org-ql-test-data-buffer "data2.org"))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))
         (org-ql-expect ('(tags "fruit"))
           '("Fruit" "Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))))
 
     (describe "(tags-inherited)"
 
@@ -1440,10 +1525,10 @@ with keyword arg NOW in PLIST."
       (org-ql-it "with file tags"
         (org-ql-expect ('(tags-inherited "food"))
           '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
-          :buffer (org-ql-test-data-buffer "data2.org"))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))
         (org-ql-expect ('(tags-inherited "fruit"))
           '("Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))))
 
     (describe "(tags-local)"
 
@@ -1470,10 +1555,10 @@ with keyword arg NOW in PLIST."
       (org-ql-it "with file tags"
         (org-ql-expect ('(tags-local "food"))
           nil
-          :buffer (org-ql-test-data-buffer "data2.org"))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))
         (org-ql-expect ('(tags-local "fruit"))
           '("Fruit")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))))
 
     (describe "(tags-all), (tags&)"
 
@@ -1486,7 +1571,7 @@ with keyword arg NOW in PLIST."
       (org-ql-it "with file tags"
         (org-ql-expect ('(tags-all "food" "fruit"))
           '("Fruit" "Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))))
 
     (describe "(tags-regexp), (tags*)"
 
@@ -1511,10 +1596,10 @@ with keyword arg NOW in PLIST."
       (org-ql-it "with regexp matching file tags"
         (org-ql-expect ('(tags-regexp "foo"))
           '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
-          :buffer (org-ql-test-data-buffer "data2.org"))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))
         (org-ql-expect ('(tags* "frui"))
           '("Fruit" "Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data-file-tags.org"))))
 
     (describe "(ts)"
 
@@ -1759,14 +1844,14 @@ with keyword arg NOW in PLIST."
     ;; have a chance to be gathered.  So we make a test buffer and run the test in that, with a test heading.
 
     (let ((test-buffer (get-buffer-create "*test-org-ql*")))
-      (cl-flet ((open-link
-                 (link) (with-current-buffer test-buffer
-                          (erase-buffer)
-                          (org-mode)
-                          (insert "* TODO Test heading \n\n")
-                          (insert link)
-                          (backward-char 1)
-                          (call-interactively #'org-open-at-point))))
+      (cl-flet ((open-link (link)
+                  (with-current-buffer test-buffer
+                    (erase-buffer)
+                    (org-mode)
+                    (insert "* TODO Test heading \n\n")
+                    (insert link)
+                    (backward-char 1)
+                    (call-interactively #'org-open-at-point))))
 
         (describe "buffers-files parameter"
           :var ((quoted-lambda-link "[[org-ql-search:todo:?buffers-files%3D%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29]]")
@@ -1921,16 +2006,15 @@ with keyword arg NOW in PLIST."
           (when-let ((buffer (find-file-noselect filename 'nowarn)))
             (kill-buffer buffer))))
 
-      (cl-flet ((var-after-bookmark-set-and-jump
-                 (var buffers-files query &key sort super-groups)
-                 (org-ql-search buffers-files query
-                   :super-groups super-groups
-                   :sort sort :title title :buffer view-buffer)
-                 (set-buffer view-buffer)
-                 (bookmark-set title)
-                 (kill-buffer)
-                 (bookmark-jump title)
-                 (buffer-local-value var (get-buffer (concat "*Org QL View: " title "*")))))
+      (cl-flet ((var-after-bookmark-set-and-jump (var buffers-files query &key sort super-groups)
+                  (org-ql-search buffers-files query
+                    :super-groups super-groups
+                    :sort sort :title title :buffer view-buffer)
+                  (set-buffer view-buffer)
+                  (bookmark-set title)
+                  (kill-buffer)
+                  (bookmark-jump title)
+                  (buffer-local-value var (get-buffer (concat "*Org QL View: " title "*")))))
 
         (describe "Grouping"
           :var ((query '(and (todo "TODO") (regexp "heading")))
@@ -1984,18 +2068,18 @@ with keyword arg NOW in PLIST."
     (describe "Dynamic blocks"
       (describe "warn about sexp queries"
 
-        (cl-flet ((test-dblock
-                   (&optional input) (with-current-buffer (get-buffer-create "*TEST DBLOCK*")
-                                       (erase-buffer)
-                                       (org-mode)
-                                       (insert "* TODO Heading 1\n\n"
-                                               "#+BEGIN: org-ql :query (or (todo) (regexp \"Heading\")) :columns (todo)\n"
-                                               "#+END:")
-                                       (goto-char (point-min))
-                                       (forward-line 2)
-                                       (with-simulated-input input
-                                         (org-dblock-update))
-                                       (kill-buffer))))
+        (cl-flet ((test-dblock (&optional input)
+                    (with-current-buffer (get-buffer-create "*TEST DBLOCK*")
+                      (erase-buffer)
+                      (org-mode)
+                      (insert "* TODO Heading 1\n\n"
+                              "#+BEGIN: org-ql :query (or (todo) (regexp \"Heading\")) :columns (todo)\n"
+                              "#+END:")
+                      (goto-char (point-min))
+                      (forward-line 2)
+                      (with-simulated-input input
+                        (org-dblock-update))
+                      (kill-buffer))))
 
           (it "when org-ql-ask-unsafe-queries is non-nil"
             ;; TODO: Should the query be converted to string form if possible and only warn if not?
@@ -2024,39 +2108,37 @@ with keyword arg NOW in PLIST."
           (insert "* TODO Test heading\n\n")
           (org-mode)))
 
-      (cl-flet* ((open-link-in
-                  (link buffer input)
-                  ;; Org REDUCED THE NUMBER OF ARGUMENTS TO `org-open-link-from-string'!  That BREAKS BACKWARD
-                  ;; COMPATIBILITY!  So I have to make my own function so these tests can work across Org versions!
-                  (with-current-buffer buffer
-                    (erase-buffer)
-                    (org-mode)
-                    (insert "* TODO Test heading\n\n")
-                    (insert link)
-                    (backward-char 1)
-                    (with-simulated-input input
-                      (org-open-at-point))))
+      (cl-flet* ((open-link-in (link buffer input)
+                   ;; Org REDUCED THE NUMBER OF ARGUMENTS TO `org-open-link-from-string'!  That BREAKS BACKWARD
+                   ;; COMPATIBILITY!  So I have to make my own function so these tests can work across Org versions!
+                   (with-current-buffer buffer
+                     (erase-buffer)
+                     (org-mode)
+                     (insert "* TODO Test heading\n\n")
+                     (insert link)
+                     (backward-char 1)
+                     (with-simulated-input input
+                       (org-open-at-point))))
 
-                 (var-after-link-save-open
-                  (var buffers-files query &key sort super-groups
-                       (buffer link-buffer) (store-input "RET") open-input)
-                  (org-ql-search buffers-files query
-                    :super-groups super-groups
-                    :sort sort :title title :buffer view-buffer)
-                  (with-current-buffer view-buffer
-                    (cl-assert (member '("org-ql-search" :follow org-ql-view--link-follow :store org-ql-view--link-store)
-                                       org-link-parameters)
-                               t)
-                    (with-simulated-input store-input
-                      ;; Avoid writing "Stored: ..." to test output.
-                      (let ((inhibit-message t))
-                        (call-interactively #'org-store-link nil)))
-                    (kill-buffer))
-                  (cl-assert (and org-stored-links (caar org-stored-links)) t)
-                  (open-link-in (caar org-stored-links) buffer open-input)
-                  (with-current-buffer (get-buffer (concat "*Org QL View: " title "*"))
-                    (prog1 (buffer-local-value var (current-buffer))
-                      (kill-buffer)))))
+                 (var-after-link-save-open (var buffers-files query &key sort super-groups
+                                                (buffer link-buffer) (store-input "RET") open-input)
+                   (org-ql-search buffers-files query
+                     :super-groups super-groups
+                     :sort sort :title title :buffer view-buffer)
+                   (with-current-buffer view-buffer
+                     (cl-assert (member '("org-ql-search" :follow org-ql-view--link-follow :store org-ql-view--link-store)
+                                        org-link-parameters)
+                                t)
+                     (with-simulated-input store-input
+                       ;; Avoid writing "Stored: ..." to test output.
+                       (let ((inhibit-message t))
+                         (call-interactively #'org-store-link nil)))
+                     (kill-buffer))
+                   (cl-assert (and org-stored-links (caar org-stored-links)) t)
+                   (open-link-in (caar org-stored-links) buffer open-input)
+                   (with-current-buffer (get-buffer (concat "*Org QL View: " title "*"))
+                     (prog1 (buffer-local-value var (current-buffer))
+                       (kill-buffer)))))
 
         (describe "Queries"
           :var ((string-query "todo:TODO regexp:heading")

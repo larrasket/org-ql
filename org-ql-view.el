@@ -1,5 +1,7 @@
 ;;; org-ql-view.el --- Agenda-like view based on org-ql  -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2019-2023  Adam Porter
+
 ;; Author: Adam Porter <adam@alphapapa.net>
 ;; Url: https://github.com/alphapapa/org-ql
 
@@ -40,10 +42,8 @@
 
 (require 'org-ql)
 
-;; FIXME: check-declare declares "function not found", even though it
-;; clearly is.  It seems to not handle cl-defun, even though its code
-;; appears to account for it.
 (declare-function org-ql-search "org-ql-search" t)
+(declare-function org-ql-search--org-link-store-props "org-ql-search" t)
 
 (require 'dash)
 (require 's)
@@ -153,11 +153,11 @@ See info node `(elisp)Cyclic Window Ordering'."
                 (interactive)
                 (let* ((ts (ts-now))
                        (beg-of-week (->> ts
-                                      (ts-adjust 'day (- (ts-dow (ts-now))))
-                                      (ts-apply :hour 0 :minute 0 :second 0)))
+                                         (ts-adjust 'day (- (ts-dow (ts-now))))
+                                         (ts-apply :hour 0 :minute 0 :second 0)))
                        (end-of-week (->> ts
-                                      (ts-adjust 'day (- 6 (ts-dow (ts-now))))
-                                      (ts-apply :hour 23 :minute 59 :second 59))))
+                                         (ts-adjust 'day (- 6 (ts-dow (ts-now))))
+                                         (ts-apply :hour 23 :minute 59 :second 59))))
                   (org-ql-search (org-agenda-files)
                     `(ts-active :from ,beg-of-week
                                 :to ,end-of-week)
@@ -170,11 +170,11 @@ See info node `(elisp)Cyclic Window Ordering'."
                 (interactive)
                 (let* ((ts (ts-adjust 'day 7 (ts-now)))
                        (beg-of-week (->> ts
-                                      (ts-adjust 'day (- (ts-dow (ts-now))))
-                                      (ts-apply :hour 0 :minute 0 :second 0)))
+                                         (ts-adjust 'day (- (ts-dow (ts-now))))
+                                         (ts-apply :hour 0 :minute 0 :second 0)))
                        (end-of-week (->> ts
-                                      (ts-adjust 'day (- 6 (ts-dow (ts-now))))
-                                      (ts-apply :hour 23 :minute 59 :second 59))))
+                                         (ts-adjust 'day (- 6 (ts-dow (ts-now))))
+                                         (ts-apply :hour 23 :minute 59 :second 59))))
                   (org-ql-search (org-agenda-files)
                     `(ts-active :from ,beg-of-week
                                 :to ,end-of-week)
@@ -272,8 +272,8 @@ TYPE may be `ts', `ts-active', `ts-inactive', `clocked', or
 `closed'."
   (interactive (list :num-days (read-number "Days: ")
                      :type (->> '(ts ts-active ts-inactive clocked closed)
-                             (completing-read "Timestamp type: ")
-                             intern)))
+                                (completing-read "Timestamp type: ")
+                                intern)))
   ;; It doesn't make much sense to use other date-based selectors to
   ;; look into the past, so to prevent confusion, we won't allow them.
   (-let* ((query (pcase-exhaustive type
@@ -288,7 +288,8 @@ TYPE may be `ts', `ts-active', `ts-inactive', `clocked', or
 
 ;;;###autoload
 (cl-defun org-ql-view-sidebar (&key (slot org-ql-view-list-slot))
-  "Show `org-ql-view' view list sidebar."
+  "Show `org-ql-view' view list sidebar.
+SLOT is passed to `display-buffer-in-side-window', which see."
   ;; TODO: Update sidebar when `org-ql-views' changes.
   (interactive)
   (select-window
@@ -303,10 +304,10 @@ TYPE may be `ts', `ts-active', `ts-inactive', `clocked', or
 (defun org-ql-view-switch ()
   "Switch to view at point."
   (interactive)
-  (let ((key (buffer-substring-no-properties (point-at-bol) (point-at-eol))))
+  (let ((key (buffer-substring-no-properties (pos-bol) (pos-eol))))
     (unless (string-empty-p key)
       (ov-clear :org-ql-view-selected)
-      (ov (point-at-bol) (1+ (point-at-eol)) :org-ql-view-selected t
+      (ov (pos-bol) (1+ (pos-eol)) :org-ql-view-selected t
           'face '(:weight bold :inherit highlight))
       (org-ql-view key))))
 
@@ -353,7 +354,8 @@ update search arguments."
               (yes-or-no-p (format "Overwrite view \"%s\"?" name)))
       (setf (map-elt org-ql-views name nil #'equal) plist)
       (customize-set-variable 'org-ql-views org-ql-views)
-      (customize-mark-to-save 'org-ql-views))))
+      (customize-mark-to-save 'org-ql-views)
+      (custom-save-all))))
 
 (defun org-ql-view-delete ()
   "Delete current view (with confirmation)."
@@ -363,12 +365,13 @@ update search arguments."
           (--remove (equal (car it) org-ql-view-title)
                     org-ql-views))
     (customize-set-variable 'org-ql-views org-ql-views)
-    (customize-mark-to-save 'org-ql-views)))
+    (customize-mark-to-save 'org-ql-views)
+    (custom-save-all)))
 
 (defun org-ql-view-customize ()
   "Customize view at point in `org-ql-view-sidebar' buffer."
   (interactive)
-  (let ((key (buffer-substring-no-properties (point-at-bol) (point-at-eol))))
+  (let ((key (buffer-substring-no-properties (pos-bol) (pos-eol))))
     (customize-option 'org-ql-views)
     (search-forward (concat "Name: " key))))
 
@@ -395,17 +398,17 @@ update search arguments."
     (let ((inhibit-read-only t))
       (erase-buffer)
       (->> org-ql-views
-        (-map #'car)
-        (-sort (if org-ql-view-sidebar-sort-views
-                   #'string<
-                 #'ignore))
-        (s-join "\n")
-        insert))
+           (-map #'car)
+           (-sort (if org-ql-view-sidebar-sort-views
+                      #'string<
+                    #'ignore))
+           (s-join "\n")
+           insert))
     (current-buffer)))
 
 (defvar bookmark-make-record-function)
 
-(cl-defun org-ql-view--display (&key (buffer org-ql-view-buffer) header string)
+(cl-defun org-ql-view--display (&key (buffer org-ql-view-buffer) header strings)
   "Display STRING in `org-ql-view' BUFFER.
 
 BUFFER may be a buffer, or a string naming a buffer, which is
@@ -443,7 +446,9 @@ subsequent refreshing of the buffer: `org-ql-view-buffers-files',
       ;; Clear buffer, insert entries, etc.
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert string "\n")
+        (dolist (string strings)
+          (insert string "\n"))
+        (insert "\n")
         (pop-to-buffer (current-buffer) org-ql-view-display-buffer-action)
         (org-agenda-finalize)
         (goto-char (point-min))))))
@@ -469,8 +474,8 @@ If TITLE, prepend it to the header."
                                     (format "%s" (org-ql-view--contract-buffers-files buffers-files))))
          (buffers-files-formatted (when buffers-files-formatted
                                     (propertize (->> buffers-files-formatted
-                                                  (org-ql-view--font-lock-string 'emacs-lisp-mode)
-                                                  (s-truncate available-width))
+                                                     (org-ql-view--font-lock-string 'emacs-lisp-mode)
+                                                     (s-truncate available-width))
                                                 'help-echo buffers-files-formatted))))
     (concat title
             (when query (propertize "Query:" 'face 'transient-argument))
@@ -486,11 +491,11 @@ If TITLE, prepend it to the header."
 Makes QUERY more readable, e.g. timestamp objects are replaced
 with human-readable strings."
   (cl-labels ((rec (form)
-                   (cl-typecase form
-                     (ts (ts-format form))
-                     (cons (cons (rec (car form))
-                                 (rec (cdr form))))
-                     (otherwise form))))
+                (cl-typecase form
+                  (ts (ts-format form))
+                  (cons (cons (rec (car form))
+                              (rec (cdr form))))
+                  (otherwise form))))
     (format "%S" (rec query))))
 
 (defun org-ql-view--font-lock-string (mode s)
@@ -532,14 +537,14 @@ dates in the past, and negative for dates in the future."
 
 (defun org-ql-view-bookmark-make-record ()
   "Return a bookmark record for the current Org QL View buffer."
-  (cl-labels ((file-nameize
-               (b-f) (abbreviate-file-name
-                      (cl-typecase b-f
-                        (string b-f)
-                        (buffer (or (buffer-file-name b-f)
-                                    (when (buffer-base-buffer b-f)
-                                      (buffer-file-name (buffer-base-buffer b-f)))))
-                        (t (user-error "Only file-backed buffers can be bookmarked by Org QL View: %s" b-f))))))
+  (cl-labels ((file-nameize (b-f)
+                (abbreviate-file-name
+                 (cl-typecase b-f
+                   (string b-f)
+                   (buffer (or (buffer-file-name b-f)
+                               (when (buffer-base-buffer b-f)
+                                 (buffer-file-name (buffer-base-buffer b-f)))))
+                   (t (user-error "Only file-backed buffers can be bookmarked by Org QL View: %s" b-f))))))
     (-let* ((plist (org-ql-view--plist (current-buffer)))
             ((&plist :buffers-files) plist))
       ;; Replace buffers with their filenames, and signal error if any are not file-backed.
@@ -654,25 +659,27 @@ When opened, the link searches the buffer it's opened from."
   (when org-ql-view-query
     ;; Only Org QL View buffers should have `org-ql-view-query' set.
     (cl-labels ((prompt-for (buffers-files)
-                            (pcase-exhaustive
-                                (completing-read (format "Make link that searches: ")
-                                                 '("file link is in" "files currently searched")
-                                                 nil t nil nil "file link is in")
-                              ("file link is in" nil)
-                              ("files currently searched" buffers-files)))
-                (strings-or-file-buffers-p
-                 (thing) (cl-etypecase thing
-                           (list (cl-every #'strings-or-file-buffers-p thing))
-                           (string thing)
-                           (buffer (or (buffer-file-name thing)
-                                       ;; TODO: Should indirect buffers be allowed?  Maybe not, since their narrowing isn't preserved.
-                                       ;; On the other hand, it's possible to accidentally make a search view for an indirect buffer
-                                       ;; that's since been widened, and forcing the user to manually change that would be awkward,
-                                       ;; and trying to communicate the problem would be difficult, so maybe it's okay to allow it.
-                                       (when (buffer-base-buffer thing)
-                                         (buffer-file-name (buffer-base-buffer thing))))))))
+                  (pcase-exhaustive
+                      (completing-read (format "Make link that searches: ")
+                                       '("file link is in" "files currently searched")
+                                       nil t nil nil "file link is in")
+                    ("file link is in" nil)
+                    ("files currently searched" buffers-files)))
+                (strings-or-file-buffers-p (thing)
+                  (cl-etypecase thing
+                    (list (cl-every #'strings-or-file-buffers-p thing))
+                    (string thing)
+                    (buffer (or (buffer-file-name thing)
+                                ;; TODO: Should indirect buffers be allowed?  Maybe not, since their
+                                ;; narrowing isn't preserved.  On the other hand, it's possible to
+                                ;; accidentally make a search view for an indirect buffer that's
+                                ;; since been widened, and forcing the user to manually change that
+                                ;; would be awkward, and trying to communicate the problem would be
+                                ;; difficult, so maybe it's okay to allow it.
+                                (when (buffer-base-buffer thing)
+                                  (buffer-file-name (buffer-base-buffer thing))))))))
       (unless (strings-or-file-buffers-p org-ql-view-buffers-files)
-        (user-error "Views that search non-file-backed buffers can't be linked to"))
+        (user-error "%s" "Views that search non-file-backed buffers can't be linked to"))
       (let* ((query-string (--if-let (org-ql--query-sexp-to-string org-ql-view-query)
                                it (org-ql-view--format-query org-ql-view-query)))
              (buffers-files (prompt-for (org-ql-view--contract-buffers-files org-ql-view-buffers-files)))
@@ -688,8 +695,7 @@ When opened, the link searches the buffer it's opened from."
                                "?" (url-build-query-string (delete nil params))))
              (url (url-recreate-url (url-parse-make-urlobj "org-ql-search" nil nil nil nil
                                                            filename))))
-	;; FIXME: "Warning: ‘org-store-link-props’ is an obsolete function (as of Org 9.3); use ‘org-link-store-props’ instead"
-        (org-store-link-props
+        (org-ql-search--org-link-store-props
          :type "org-ql-search"
          :link url
          :description (concat "org-ql-search: " org-ql-view-title))))
@@ -750,8 +756,8 @@ When opened, the link searches the buffer it's opened from."
   (s-truncate (- (window-width) 15)
               (concat (propertize key 'face 'transient-argument) ": "
                       (->> value
-                        org-ql-view--format-query
-                        (org-ql-view--font-lock-string 'emacs-lisp-mode)))))
+                           org-ql-view--format-query
+                           (org-ql-view--font-lock-string 'emacs-lisp-mode)))))
 
 (transient-define-infix org-ql-view--transient-title ()
   ;; TODO: Add an asterisk or something when the view has been modified but not saved.
@@ -820,6 +826,20 @@ When opened, the link searches the buffer it's opened from."
 
 ;;;; Faces/properties
 
+(defalias 'org-ql-view--resolve-element-properties
+  ;; It would be preferable to define this as an inline function, but
+  ;; that would mean that users would have to recompile org-ql when
+  ;; upgrading to Org 9.7 or else get weird errors.
+  ;; TODO(someday): Define `org-ql-view--resolve-element-properties' as inline.
+  (if (version<= "9.7" org-version)
+      (lambda (node)
+        "Resolve NODE's properties using `org-element-properties-resolve'."
+        ;; Silence warnings about `org-element-properties-resolve'
+        ;; being unresolved on earlier Org versions.
+        (with-no-warnings
+          (org-element-properties-resolve node 'force-undefer)))
+    #'identity))
+
 (defun org-ql-view--format-element (element)
   ;; This essentially needs to do what `org-agenda-format-item' does,
   ;; which is a lot.  We are a long way from that, but it's a start.
@@ -829,6 +849,7 @@ returned by `org-element-parse-buffer'.  If ELEMENT is nil,
 return an empty string."
   (if (not element)
       ""
+    (setf element (org-ql-view--resolve-element-properties element))
     (let* ((properties (cadr element))
            ;; Remove the :parent property, which so bloats the size of
            ;; the properties list that it makes it essentially
@@ -850,8 +871,7 @@ return an empty string."
            ;; Adding the relative due date property should probably be done explicitly and separately
            ;; (which would also make it easier to do it independently of faces, etc).
            (title (--> (org-ql-view--add-faces element)
-                    (org-element-property :raw-value it)
-                    (org-link-display-format it)))
+                       (org-element-property :raw-value it)))
            (todo-keyword (-some--> (org-element-property :todo-keyword element)
                            (org-ql-view--add-todo-face it)))
            (tag-list (if org-use-tag-inheritance
@@ -866,21 +886,29 @@ return an empty string."
                                                     (not type))
                                          append type)))
                            ;; No marker found
-                           ;; TODO: Use `display-warning' with `org-ql' as the type.
-                           (warn "No marker found for item: %s" title)
+                           (display-warning 'org-ql (format "No marker found for item: %s" title))
                            (org-element-property :tags element))
                        (org-element-property :tags element)))
            (tag-string (when tag-list
                          (--> tag-list
-                           (s-join ":" it)
-                           (s-wrap it ":")
-                           (org-add-props it nil 'face 'org-tag))))
-           ;;  (category (org-element-property :category element))
+                              (s-join ":" it)
+                              (s-wrap it ":")
+                              (org-add-props it nil 'face 'org-tag))))
+           (category (or (org-element-property :CATEGORY element)
+                         (when-let ((marker (or (org-element-property :org-hd-marker element)
+                                                (org-element-property :org-marker element))))
+                           (org-with-point-at marker
+                             (or (org-get-category)
+                                 (when buffer-file-name
+			           (file-name-sans-extension
+			            (file-name-nondirectory buffer-file-name))))))
+                         ""))
            (priority-string (-some->> (org-element-property :priority element)
                               (char-to-string)
                               (format "[#%s]")
                               (org-ql-view--add-priority-face)))
-           (habit-property (org-with-point-at (org-element-property :begin element)
+           (habit-property (org-with-point-at (or (org-element-property :org-hd-marker element)
+                                                  (org-element-property :org-marker element))
                              (when (org-is-habit-p)
                                (org-habit-parse-todo))))
            (due-string (pcase (org-element-property :relative-due-date element)
@@ -890,19 +918,20 @@ return an empty string."
       (remove-list-of-text-properties 0 (length string) '(line-prefix) string)
       ;; Add all the necessary properties and faces to the whole string
       (--> string
-        ;; FIXME: Use proper prefix
-        (concat "  " it)
-        (org-add-props it properties
-          'org-agenda-type 'search
-          'todo-state todo-keyword
-          'tags tag-list
-          'org-habit-p habit-property)))))
+           ;; FIXME: Use proper prefix
+           (concat "  " it)
+           (org-add-props it properties
+             'org-agenda-type 'search
+             'org-category category
+             'todo-state todo-keyword
+             'tags tag-list
+             'org-habit-p habit-property)))))
 
 (defun org-ql-view--add-faces (element)
   "Return ELEMENT with deadline and scheduled faces added."
   (->> element
-    (org-ql-view--add-scheduled-face)
-    (org-ql-view--add-deadline-face)))
+       (org-ql-view--add-scheduled-face)
+       (org-ql-view--add-deadline-face)))
 
 (defun org-ql-view--add-priority-face (string)
   "Return STRING with priority face added."
@@ -959,11 +988,11 @@ return an empty string."
                          ((> today-day-number scheduled-day-number) 'org-scheduled-previously)
                          (t 'org-scheduled)))
              (title (--> (org-element-property :raw-value element)
-                      (org-add-props it nil
-                        'face face)))
+                         (org-add-props it nil
+                           'face face)))
              (properties (--> (cadr element)
-                           (plist-put it :title title)
-                           (plist-put it :relative-due-date relative-due-date))))
+                              (plist-put it :title title)
+                              (plist-put it :relative-due-date relative-due-date))))
         (list (car element)
               properties))
     ;; Not scheduled
@@ -985,16 +1014,16 @@ property."
              ;; FIXME: Unused for now: (done-p (member todo-keyword org-done-keywords))
              ;; FIXME: Unused for now: (today-p (= today-day-number deadline-day-number))
              (deadline-passed-fraction (--> (- deadline-day-number today-day-number)
-                                         (float it)
-                                         (/ it (max org-deadline-warning-days 1))
-                                         (- 1 it)))
+                                            (float it)
+                                            (/ it (max org-deadline-warning-days 1))
+                                            (- 1 it)))
              (face (org-agenda-deadline-face deadline-passed-fraction))
              (title (--> (org-element-property :raw-value element)
-                      (org-add-props it nil
-                        'face face)))
+                         (org-add-props it nil
+                           'face face)))
              (properties (--> (cadr element)
-                           (plist-put it :title title)
-                           (plist-put it :relative-due-date relative-due-date))))
+                              (plist-put it :title title)
+                              (plist-put it :relative-due-date relative-due-date))))
         (list (car element)
               properties))
     ;; No deadline
@@ -1013,10 +1042,6 @@ property."
 ;; These functions are somewhat regrettable because of the need to keep them
 ;; in sync, but it seems worth it to provide users with the flexibility.
 
-;; FIXME: `check-declare' declares that this function is not in org-ql-search, even though
-;; it is.  It appears to happen because `org-ql-search-directories-files' is declared with
-;; `cl-defun', because when I remove "cl-", it finds it.  This makes no sense, because the
-;; source code of `check-declare' shows that it searches for "cl-defun" declarations.
 (declare-function org-ql-search-directories-files "org-ql-search" t)
 
 (defun org-ql-view--contract-buffers-files (buffers-files)
@@ -1028,11 +1053,11 @@ the variable), \"org-directory\" if it matches the value of
 current buffer.  Otherwise BUFFERS-FILES is returned unchanged."
   ;; Used in `org-ql-view--complete-buffers-files' and
   ;; `org-ql-view--header-line-format'.
-  (cl-labels ((expand-files
-               (list) (--map (cl-typecase it
-                               (string (expand-file-name it))
-                               (otherwise it))
-                             list)))
+  (cl-labels ((expand-files (list)
+                (--map (cl-typecase it
+                         (string (expand-file-name it))
+                         (otherwise it))
+                       list)))
     ;; TODO: Test this more exhaustively.
     (pcase buffers-files
       ((pred listp)
@@ -1054,10 +1079,10 @@ current buffer.  Otherwise BUFFERS-FILES is returned unchanged."
 
 (defun org-ql-view--complete-buffers-files ()
   "Return value for `org-ql-view-buffers-files' using completion."
-  (cl-labels ((initial-input
-               () (when org-ql-view-buffers-files
-                    (org-ql-view--contract-buffers-files
-                     org-ql-view-buffers-files))))
+  (cl-labels ((initial-input ()
+                (when org-ql-view-buffers-files
+                  (org-ql-view--contract-buffers-files
+                   org-ql-view-buffers-files))))
     (if (and org-ql-view-buffers-files
              (bufferp org-ql-view-buffers-files))
         ;; Buffers can't be input by name, so if the default value is a buffer, just use it.
@@ -1117,7 +1142,7 @@ The counterpart to `org-ql-view--contract-buffers-files'."
                                                      "todo")
                                                nil nil (when org-ql-view-sort
                                                          (prin1-to-string org-ql-view-sort)))
-                  (--remove (equal "buffer-order" it)))))
+                     (--remove (equal "buffer-order" it)))))
     (pcase input
       ('nil nil)
       ((and (pred listp) sort)
