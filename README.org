@@ -19,6 +19,7 @@ It includes three libraries: The =org-ql= library is flexible and may be used as
 - [[#installation][Installation]]
 - [[#usage][Usage]]
 - [[#changelog][Changelog]]
+- [[#development][Development]]
 :END:
 
 
@@ -557,6 +558,17 @@ Simple links may also be written manually in either sexp or non-sexp form, like:
 
 Nothing new yet.
 
+** 0.8.6
+
+*Fixes*
++ Bookmarking ~org-ql-view~ buffers when the ~buffers-files~ argument is a symbol (like ~org-agenda-files~).
+
+** 0.8.5
+
+*Fixes*
++ Predicate ~heading~ incorrectly matched strings as regular expressions, sometimes returning incorrect results.  (See [[https://github.com/alphapapa/org-ql/discussions/410][discussion]].  Thanks to [[https://github.com/al3xandru][Alex Popescu]] for reporting.)
++ Predicates ~ancestor~ and ~parent~ did not normalize their sub-queries, sometimes returning incorrect results.  ([[https://github.com/alphapapa/org-ql/issues/365][#365]].  Thanks to [[https://github.com/kofm][Gabriele Mongiano]] for reporting.)
+
 ** 0.8.4
 
 *Fixes*
@@ -942,6 +954,14 @@ Nothing new yet.
 ** 0.1
 
 First tagged release.
+
+* Development
+
+Bug reports, feature requests, and suggestions are welcome.  For patches, see below.
+
+** Copyright assignment
+
+While Org QL is currently distributed in MELPA, it's [[https://github.com/alphapapa/org-ql/issues/409][intended]] to merge Org QL into Org mode.  When that happens, it will become a part of Emacs and Org, and therefore cumulative contributions of more than 15 lines of code will require that the author assign copyright of such contributions to the FSF.  Authors who are interested in doing so may contact [[mailto:assign@gnu.org][assign@gnu.org]] to request the appropriate form.
 
 * Notes
 :PROPERTIES:
